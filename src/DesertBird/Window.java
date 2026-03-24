@@ -3,6 +3,7 @@ package DesertBird;
 import javax.imageio.ImageIO;
 import javax.sound.sampled.*;
 import javax.swing.*;
+
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.AffineTransform;
@@ -349,13 +350,8 @@ abstract class GameObject {
 }
 
 class Bird extends GameObject {
-    @SuppressWarnings("unused")
-    private static final int SOURCE_FRAME_SIZE = 128;
-
     private static final int DRAW_SIZE = 64;
-
     private static final int IDLE_FRAME_COUNT = 6;
-
     private static final int FALL_LIMIT = 10;
 
     private double velocityY;
@@ -366,7 +362,6 @@ class Bird extends GameObject {
     private BirdState state = BirdState.IDLE;
 
     private BufferedImage[] idleFrames;
-    private Image jumpFrame;
     private Image fallFrame;
     private Image hitFrame;
     private Image deadFrame;
@@ -377,12 +372,15 @@ class Bird extends GameObject {
 
     private boolean stunned = false;
 
+    private boolean flapPlaying = false;
+    private int flapLoopsLeft = 0;
+
     public Bird(int x, int y) {
         super(x, y);
 
         loadAnimations();
 
-        this.image = idleFrames[0] != null ? idleFrames[0] : jumpFrame;
+        this.image = idleFrames[0] != null ? idleFrames[0] : fallFrame;
         this.width = DRAW_SIZE;
         this.height = DRAW_SIZE;
         this.velocityY = 0;
@@ -390,24 +388,20 @@ class Bird extends GameObject {
 
     private void loadAnimations() {
         idleFrames = loadIdleSheet("eagle_idle_sheet.png");
-        jumpFrame = loadSingleImage("eagle_jump.png");
         fallFrame = loadSingleImage("eagle_fall.png");
         hitFrame = loadSingleImage("eagle_hit.png");
         deadFrame = loadSingleImage("eagle_dead.png");
     }
 
     private BufferedImage[] loadIdleSheet(String fileName) {
-
         BufferedImage[] frames = new BufferedImage[IDLE_FRAME_COUNT];
 
         try {
             URL resource = getClass().getResource(fileName);
             if (resource != null) {
-
                 BufferedImage sheet = ImageIO.read(resource);
 
                 if (sheet != null) {
-
                     int baseFrameCount = 4;
                     int frameWidth = sheet.getWidth() / baseFrameCount;
                     int frameHeight = sheet.getHeight();
@@ -418,7 +412,6 @@ class Bird extends GameObject {
                         baseFrames[i] = sheet.getSubimage(i * frameWidth, 0, frameWidth, frameHeight);
                     }
 
-                    // ping-pong
                     frames[0] = baseFrames[0];
                     frames[1] = baseFrames[1];
                     frames[2] = baseFrames[2];
@@ -427,16 +420,17 @@ class Bird extends GameObject {
                     frames[5] = baseFrames[1];
                 }
             }
-
         } catch (IOException ignored) {
         }
 
         return frames;
     }
-    
+
     public void tickIdleOnly() {
         state = BirdState.IDLE;
         velocityY = 0;
+        flapPlaying = false;
+        flapLoopsLeft = 0;
         updateAnimation();
     }
 
@@ -474,7 +468,14 @@ class Bird extends GameObject {
 
         y += (int) Math.round(velocityY);
 
-        updateStateByVelocity();
+        if (velocityY > 1.5) {
+            state = BirdState.FALL;
+        } else if (flapPlaying || velocityY < -1) {
+            state = BirdState.JUMP;
+        } else {
+            state = BirdState.IDLE;
+        }
+
         updateAnimation();
     }
 
@@ -506,8 +507,19 @@ class Bird extends GameObject {
 
         velocityY = jumpStrength;
         state = BirdState.JUMP;
-        frameIndex = 0;
-        animationTick = 0;
+
+        if (!flapPlaying) {
+            flapPlaying = true;
+            flapLoopsLeft = 1;
+            frameIndex = 0;
+            animationTick = 0;
+        } else {
+            flapLoopsLeft = 1;
+            if (frameIndex >= IDLE_FRAME_COUNT - 2) {
+                frameIndex = 0;
+                animationTick = 0;
+            }
+        }
     }
 
     public void hitRock() {
@@ -521,20 +533,9 @@ class Bird extends GameObject {
         velocityY = -1.5;
         frameIndex = 0;
         animationTick = 0;
-    }
 
-    private void updateStateByVelocity() {
-        if (state == BirdState.HIT || state == BirdState.DEAD_FALL) {
-            return;
-        }
-
-        if (velocityY < -1) {
-            state = BirdState.JUMP;
-        } else if (velocityY > 1.5) {
-            state = BirdState.FALL;
-        } else {
-            state = BirdState.IDLE;
-        }
+        flapPlaying = false;
+        flapLoopsLeft = 0;
     }
 
     private void updateAnimation() {
@@ -550,7 +551,23 @@ class Bird extends GameObject {
                 break;
 
             case JUMP:
-                image = jumpFrame != null ? jumpFrame : idleFrames[0];
+                if (animationTick >= 4) {
+                    animationTick = 0;
+                    frameIndex++;
+
+                    if (frameIndex >= IDLE_FRAME_COUNT) {
+                        frameIndex = 0;
+
+                        if (flapPlaying && flapLoopsLeft > 0) {
+                            flapLoopsLeft--;
+                        }
+
+                        if (flapLoopsLeft <= 0) {
+                            flapPlaying = false;
+                        }
+                    }
+                }
+                image = idleFrames[frameIndex] != null ? idleFrames[frameIndex] : null;
                 break;
 
             case FALL:
@@ -690,7 +707,6 @@ class Tube extends GameObject {
     }
 
     private void renderTopRock(Graphics2D g, ImageObserver obs) {
-
         if (rockBodyTile != null) {
             int capHeight = Math.min(TOP_CAP_HEIGHT, height);
             int bodyHeight = Math.max(0, height - capHeight + BODY_OVERLAP);
@@ -717,7 +733,6 @@ class Tube extends GameObject {
     }
 
     private void renderBottomRock(Graphics2D g, ImageObserver obs) {
-
         if (rockBodyTile != null) {
             int topCapHeight = Math.min(TOP_CAP_HEIGHT, height);
             int bottomCapHeight = Math.min(BOTTOM_CAP_HEIGHT, height);
@@ -829,7 +844,6 @@ class Tube extends GameObject {
         return new Rectangle(x, y, width, height);
     }
 }
-
 class TubePair {
     private final Tube topTube;
     private final Tube bottomTube;
@@ -839,7 +853,6 @@ class TubePair {
         int tubeWidth = Tube.TUBE_WIDTH;
 
         int minRockHeight = 100;
-
         int playableBottom = Window.HEIGHT;
 
         int safeGapY = Math.max(minRockHeight, gapY);
@@ -900,23 +913,13 @@ class TubeColumn {
     private int spawnDelay;
     private int gapHeight;
 
-    // Min column speed
     private static final int START_SPEED = 5;
-
-    // Max speed
     private static final int MAX_SPEED = 10;
-
-    // Column frequencie
     private static final int START_SPAWN_DELAY = 95;
     private static final int MIN_SPAWN_DELAY = 72;
-
-    // Gap
     private static final int START_GAP_HEIGHT = 170;
     private static final int MIN_GAP_HEIGHT = 115;
-
-    // Column height
     private static final int MIN_ROCK_HEIGHT = 100;
-
     private static final int SPAWN_X_OFFSET = 60;
 
     public TubeColumn() {
@@ -930,6 +933,24 @@ class TubeColumn {
         gapHeight = START_GAP_HEIGHT;
 
         addTubePair();
+    }
+
+    public void tickNoScore() {
+        Iterator<TubePair> iterator = tubePairs.iterator();
+        while (iterator.hasNext()) {
+            TubePair pair = iterator.next();
+            pair.tick(speed);
+
+            if (pair.isOffScreen()) {
+                iterator.remove();
+            }
+        }
+
+        spawnTimer++;
+        if (spawnTimer >= spawnDelay) {
+            spawnTimer = 0;
+            addTubePair();
+        }
     }
 
     private void addTubePair() {
@@ -982,7 +1003,6 @@ class TubeColumn {
     }
 
     private void increaseDifficulty() {
-
         if (points % 5 == 0 && speed < MAX_SPEED) {
             speed++;
         }
@@ -1095,9 +1115,22 @@ class RealImage implements IImage {
 }
 
 class Game extends JPanel implements ActionListener {
-    private boolean isRunning = false;
+    /**
+	 * 
+	 */
+	private static final long serialVersionUID = 1L;
+	private boolean isRunning = false;
     private boolean gameOver = false;
     private boolean deathSequenceStarted = false;
+
+    private boolean startDelayActive = false;
+    private long startDelayStartTime = 0L;
+    private static final long START_DELAY_MS = 350L;
+    
+    private Image splashImage;
+    private boolean showSplash = true;
+    private long splashStartTime = System.currentTimeMillis();
+    private static final long SPLASH_DURATION_MS = 3600L;
 
     private Image background;
     private Image groundTileImage;
@@ -1105,9 +1138,8 @@ class Game extends JPanel implements ActionListener {
 
     private Image frameLarge;
     private Image frameSmall;
-    
+
     private Bird menuBird;
-    
     private Rectangle soundButtonBounds = new Rectangle(20, 15, 150, 50);
 
     private Bird bird;
@@ -1115,7 +1147,6 @@ class Game extends JPanel implements ActionListener {
     private int highScore;
 
     private int groundOffset = 0;
-
     private int groundSpeed = 4;
 
     private SoundManager soundManager;
@@ -1124,8 +1155,6 @@ class Game extends JPanel implements ActionListener {
     private boolean deadSoundPlayed = false;
     private boolean gameOverSoundPlayed = false;
 
-    private static final String HIGH_SCORE_FILE = "highscore.dat";
-
     public Game() {
         background = loadImage("background.jpg");
         groundTileImage = loadImage("ground_tile.png");
@@ -1133,10 +1162,15 @@ class Game extends JPanel implements ActionListener {
 
         frameLarge = loadImage("frame_1.png");
         frameSmall = loadImage("frame_2.png");
-        
+        splashImage = loadImage("load_screen.png");
+
         addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
+                if (showSplash) {
+                    return;
+                }
+
                 if (!isRunning && soundButtonBounds.contains(e.getPoint())) {
                     if (!gameOver) {
                         soundManager.toggleMute();
@@ -1149,9 +1183,8 @@ class Game extends JPanel implements ActionListener {
         });
 
         soundManager = new SoundManager();
-
         highScore = SettingsManager.loadHighScore();
-        
+
         menuBird = new Bird(170, 260);
 
         setFocusable(true);
@@ -1162,6 +1195,35 @@ class Game extends JPanel implements ActionListener {
         timer.start();
     }
     
+    private void drawSplash(Graphics2D g2) {
+        g2.setColor(Color.BLACK);
+        g2.fillRect(0, 0, getWidth(), getHeight());
+
+        long elapsed = System.currentTimeMillis() - splashStartTime;
+        float progress = Math.min(1f, elapsed / 600f);
+        int alpha = (int) (255 * progress);
+
+        if (splashImage != null) {
+            int imgW = splashImage.getWidth(null);
+            int imgH = splashImage.getHeight(null);
+
+            int targetW = (int) (getWidth() * 0.42f);
+            int targetH = imgW > 0 ? (int) (imgH * (targetW / (double) imgW)) : (int) (getHeight() * 0.25f);
+
+            int x = (getWidth() - targetW) / 2;
+            int y = (getHeight() - targetH) / 2;
+
+            Composite oldComposite = g2.getComposite();
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha / 255f));
+            g2.drawImage(splashImage, x, y, targetW, targetH, null);
+            g2.setComposite(oldComposite);
+        }
+
+//        g2.setColor(new Color(255, 255, 255, alpha));
+//        g2.setFont(new Font("SansSerif", Font.BOLD, 24));
+//        drawCenteredText(g2, "Loading...", getWidth() / 2, (int) (getHeight() * 0.72f));
+    }
+
     private void drawSoundButton(Graphics2D g2) {
         int x = soundButtonBounds.x;
         int y = soundButtonBounds.y;
@@ -1198,37 +1260,20 @@ class Game extends JPanel implements ActionListener {
         return null;
     }
 
-    private int loadHighScore() {
-        File file = new File(HIGH_SCORE_FILE);
-
-        if (!file.exists()) {
-            return 0;
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            String line = reader.readLine();
-            if (line != null) {
-                return Integer.parseInt(line.trim());
-            }
-        } catch (IOException | NumberFormatException e) {
-            e.printStackTrace();
-        }
-
-        return 0;
-    }
-
-    private void saveHighScore() {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(HIGH_SCORE_FILE))) {
-            writer.write(String.valueOf(highScore));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
     @Override
     public void actionPerformed(ActionEvent e) {
         Toolkit.getDefaultToolkit().sync();
         
+        if (showSplash) {
+            long elapsed = System.currentTimeMillis() - splashStartTime;
+            if (elapsed >= SPLASH_DURATION_MS) {
+                showSplash = false;
+                soundManager.ensureMainPlayingIfAllowed();
+            }
+            repaint();
+            return;
+        }
+
         if (!gameOver) {
             soundManager.playMainLoop();
         }
@@ -1239,6 +1284,19 @@ class Game extends JPanel implements ActionListener {
         }
 
         if (isRunning) {
+            if (startDelayActive) {
+                long elapsed = System.currentTimeMillis() - startDelayStartTime;
+                if (elapsed >= START_DELAY_MS) {
+                    startDelayActive = false;
+                } else {
+                    if (bird != null) {
+                        bird.tickIdleOnly();
+                    }
+                    repaint();
+                    return;
+                }
+            }
+
             if (tubeColumn != null) {
                 groundSpeed = tubeColumn.getSpeed();
             }
@@ -1250,9 +1308,26 @@ class Game extends JPanel implements ActionListener {
                 groundOffset += groundTileWidth;
             }
 
-            bird.tick();
+            if (bird != null) {
+                bird.tick();
+            }
 
-            boolean scoredNow = tubeColumn.tick(bird);
+            boolean scoredNow = false;
+
+            if (tubeColumn != null && bird != null) {
+                if (!deathSequenceStarted) {
+                    scoredNow = tubeColumn.tick(bird);
+
+                    if (tubeColumn.checkCollision(bird)) {
+                        deathSequenceStarted = true;
+                        bird.hitRock();
+                        scoredNow = false;
+                    }
+                } else {
+                    tubeColumn.tickNoScore();
+                }
+            }
+
             if (scoredNow) {
                 soundManager.playScore();
             }
@@ -1260,11 +1335,6 @@ class Game extends JPanel implements ActionListener {
             if (!deathSequenceStarted && bird.getY() < 0) {
                 bird.setY(0);
                 bird.setVelocityY(0);
-            }
-
-            if (!deathSequenceStarted && tubeColumn.checkCollision(bird)) {
-                deathSequenceStarted = true;
-                bird.hitRock();
             }
 
             if (deathSequenceStarted) {
@@ -1277,8 +1347,12 @@ class Game extends JPanel implements ActionListener {
                 }
             }
 
-            if (bird.getY() + bird.getHeight() >= Window.HEIGHT - Window.GROUND_HEIGHT) {
-                bird.setY(Window.HEIGHT - Window.GROUND_HEIGHT - bird.getHeight());
+            int groundCollisionInset = 45;
+
+            int groundCollisionY = Window.HEIGHT - Window.GROUND_HEIGHT + groundCollisionInset;
+
+            if (bird.getY() + bird.getHeight() >= groundCollisionY) {
+                bird.setY(groundCollisionY - bird.getHeight());
 
                 if (!gameOverSoundPlayed) {
                     soundManager.stopMain();
@@ -1289,10 +1363,10 @@ class Game extends JPanel implements ActionListener {
                 endGame();
             }
         }
-        
+
         if (!isRunning && !gameOver && menuBird != null) {
             menuBird.tickIdleOnly();
-            menuBird.setY(260 + (int)(Math.sin(System.currentTimeMillis() / 180.0) * 8));
+            menuBird.setY(260 + (int) (Math.sin(System.currentTimeMillis() / 180.0) * 8));
         }
 
         repaint();
@@ -1302,10 +1376,15 @@ class Game extends JPanel implements ActionListener {
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
+        
+        if (showSplash) {
+            drawSplash(g2);
+            return;
+        }
 
         drawBackground(g2);
         drawGround(g2);
-        
+
         if (!isRunning && !gameOver && menuBird != null) {
             menuBird.render(g2, this);
         }
@@ -1321,7 +1400,7 @@ class Game extends JPanel implements ActionListener {
         if (bird != null) {
             bird.render(g2, this);
         }
-        
+
         if (!isRunning) {
             drawSoundButton(g2);
         }
@@ -1414,18 +1493,14 @@ class Game extends JPanel implements ActionListener {
     }
 
     private void drawLargeFrame(Graphics2D g2) {
-
         if (frameLarge == null) {
             return;
         }
 
         int imgWidth = frameLarge.getWidth(null);
-        int imgHeight = frameLarge.getHeight(null);
-
         int x = (Window.WIDTH - imgWidth) / 2;
-
         int y = 0;
-        
+
         g2.drawImage(frameLarge, x, y, null);
     }
 
@@ -1461,46 +1536,29 @@ class Game extends JPanel implements ActionListener {
     }
 
     private void drawOverlay(Graphics2D g2) {
-
         drawLargeFrame(g2);
 
         int centerX = Window.WIDTH / 2;
-        int frameX = (Window.WIDTH - frameLarge.getWidth(null)) / 2;
-        int frameY = 0;
-
         g2.setColor(new Color(60, 30, 15));
 
         if (gameOver) {
-
-            // Game Over
             g2.setFont(new Font("Serif", Font.BOLD, 56));
             drawCenteredText(g2, "Game Over", centerX, 265);
 
-            // Score
             g2.setFont(new Font("SansSerif", Font.BOLD, 30));
             drawCenteredText(g2, "Score: " + (tubeColumn != null ? tubeColumn.getPoints() : 0), centerX, 318);
 
-            // Restart
             g2.setFont(new Font("SansSerif", Font.BOLD, 24));
-            drawCenteredText(g2, "Press Enter to restart", centerX, 378);
-
-            // Jump
-            drawCenteredText(g2, "Press Space to jump", centerX, 425);
-
+            drawCenteredText(g2, "Press Space to RESTART", centerX, 378);
+            drawCenteredText(g2, "Press Space to JUMP", centerX, 425);
         } else {
-
-            // Game name
             g2.setFont(new Font("Serif", Font.BOLD, 60));
             drawCenteredText(g2, "Desert Bird", centerX, 266);
 
-            // Start
             g2.setFont(new Font("SansSerif", Font.BOLD, 28));
-            drawCenteredText(g2, "Press Enter to start", centerX, 318);
+            drawCenteredText(g2, "Press Space to START", centerX, 318);
+            drawCenteredText(g2, "Press Space to JUMP", centerX, 378);
 
-            // Jump
-            drawCenteredText(g2, "Press Space to jump", centerX, 378);
-
-            // author
             g2.setFont(new Font("SansSerif", Font.BOLD, 16));
             g2.setColor(new Color(70, 40, 20));
             g2.drawString("© Jevgenij Anisimov", 25, 558);
@@ -1521,6 +1579,9 @@ class Game extends JPanel implements ActionListener {
 
         soundManager.stopGameOver();
         soundManager.ensureMainPlayingIfAllowed();
+
+        startDelayActive = true;
+        startDelayStartTime = System.currentTimeMillis();
     }
 
     private void endGame() {
@@ -1543,11 +1604,16 @@ class Game extends JPanel implements ActionListener {
 
         @Override
         public void keyPressed(KeyEvent e) {
-            if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                restartGame();
+            if (showSplash) {
+                return;
             }
 
-            if (isRunning) {
+            if (e.getKeyCode() == KeyEvent.VK_SPACE) {
+                if (!isRunning) {
+                    restartGame();
+                    return;
+                }
+
                 controller.controller(bird, e);
             }
         }
@@ -1565,7 +1631,6 @@ public class Window {
 
     public static final int WIDTH = 900;
     public static final int HEIGHT = 600;
-
     public static final int GROUND_HEIGHT = 110;
 
     public Window(int width, int height, String title, Game game) {
